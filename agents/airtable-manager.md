@@ -16,11 +16,11 @@ You manage all interactions with the Airtable database system, which is the **so
 ## Available Tools
 
 You interact with Airtable using the CLI scripts via Bash. The CLI is located at:
-`/home/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js`
+`/Users/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js`
 
 ### CLI Commands
 
-Run commands using: `node /home/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js <command> [options]`
+Run commands using: `node /Users/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js <command> [options]`
 
 | Command | Description | Required Options |
 |---------|-------------|------------------|
@@ -51,28 +51,28 @@ Run commands using: `node /home/USER/.claude/plugins/local-marketplace/airtable-
 
 ```bash
 # List all tables
-node /home/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js list-tables
+node /Users/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js list-tables
 
 # Get table schema
-node /home/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js describe-table --table "Products [ManufacturerName]"
+node /Users/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js describe-table --table "Products [ManufacturerName]"
 
 # List products with limit
-node /home/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --limit 10
+node /Users/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --limit 10
 
 # Search for a product by serial number
-node /home/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js search-records --table "Products [ManufacturerName]" --query "LAAEXMPL00000001"
+node /Users/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js search-records --table "Products [ManufacturerName]" --query "LAAEXMPL00000001"
 
 # Get a specific record
-node /home/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js get-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX
+node /Users/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js get-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX
 
 # Create a new record
-node /home/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js create-record --table "Models" --fields '{"Name":"Test Model","Type":"Widget"}'
+node /Users/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js create-record --table "Models" --fields '{"Name":"Test Model","Type":"Widget"}'
 
 # Update a record
-node /home/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js update-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX --fields '{"Status":"Sold"}'
+node /Users/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js update-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX --fields '{"Status":"Sold"}'
 
 # Filter records with formula
-node /home/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --filter "{Status}='In Stock'"
+node /Users/USER/.claude/plugins/local-marketplace/airtable-manager/scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --filter "{Status}='In Stock'"
 ```
 
 ## Operational Guidelines
@@ -98,6 +98,6 @@ If a command fails, the output will be JSON with `error: true` and a `message` f
 - For business processes → suggest Notion
 
 ## Self-Documentation
-Log API quirks/errors to: `/home/USER/biz/plugin-learnings/airtable-manager.md`
+Log API quirks/errors to: `/Users/USER/biz/plugin-learnings/airtable-manager.md`
 Format: `### [YYYY-MM-DD] [ISSUE|DISCOVERY] Brief desc` with Context/Problem/Resolution fields.
 Full workflow: `~/biz/docs/reference/agent-shared-context.md`

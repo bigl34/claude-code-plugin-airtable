@@ -76,28 +76,28 @@ node scripts/dist/cli.js list-tables
 
 ```bash
 # List all tables
-node scripts/dist/cli.js list-tables
+node /Users/USER/node scripts/dist/cli.js list-tables
 
 # Get table schema
-node scripts/dist/cli.js describe-table --table "Products [ManufacturerName]"
+node /Users/USER/node scripts/dist/cli.js describe-table --table "Products [ManufacturerName]"
 
 # List products with limit
-node scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --limit 10
+node /Users/USER/node scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --limit 10
 
 # Search for a product by serial number
-node scripts/dist/cli.js search-records --table "Products [ManufacturerName]" --query "LAAEXMPL00000001"
+node /Users/USER/node scripts/dist/cli.js search-records --table "Products [ManufacturerName]" --query "LAAEXMPL00000001"
 
 # Get a specific record
-node scripts/dist/cli.js get-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX
+node /Users/USER/node scripts/dist/cli.js get-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX
 
 # Create a new record
-node scripts/dist/cli.js create-record --table "Models" --fields '{"Name":"Test Model","Type":"Widget"}'
+node /Users/USER/node scripts/dist/cli.js create-record --table "Models" --fields '{"Name":"Test Model","Type":"Widget"}'
 
 # Update a record
-node scripts/dist/cli.js update-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX --fields '{"Status":"Sold"}'
+node /Users/USER/node scripts/dist/cli.js update-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX --fields '{"Status":"Sold"}'
 
 # Filter records with formula
-node scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --filter "{Status}='In Stock'"
+node /Users/USER/node scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --filter "{Status}='In Stock'"
 ```
 
 ## How It Works

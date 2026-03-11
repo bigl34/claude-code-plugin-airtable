@@ -25,7 +25,7 @@ Dedicated agent for Airtable database operations with isolated MCP access
 ## Quick Start
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USER/claude-code-plugin-airtable.git
+git clone https://github.com/bigl34/claude-code-plugin-airtable.git
 cd claude-code-plugin-airtable
 cp config.template.json config.json  # fill in your credentials
 cd scripts && npm install
@@ -70,7 +70,7 @@ Copy `config.template.json` to `config.json` and fill in the required values:
 
 | Option               | Description                                       |
 | -------------------- | ------------------------------------------------- |
-| `--base <baseId>`    | Airtable base ID (default: YOUR_AIRTABLE_BASE_ID) |
+| `--base <baseId>`    | Airtable base ID (default: your-base-id) |
 | `--table <name>`     | Table name (e.g., "Products [ManufacturerName]")  |
 | `--id <recordId>`    | Record ID (e.g., recXXXXXXXXXXXXXX)               |
 | `--ids <ids>`        | Comma-separated record IDs                        |

@@ -3,7 +3,7 @@
 
 Dedicated agent for Airtable database operations with isolated MCP access
 
-![Version](https://img.shields.io/badge/version-1.1.10-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Version](https://img.shields.io/badge/version-1.2.0-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 ## Features
 
@@ -45,14 +45,6 @@ node scripts/dist/cli.js list-tables
    ```
 4. Ensure the MCP server binary is available on your system (see the service's documentation)
 
-## Configuration
-
-Copy `config.template.json` to `config.json` and fill in the required values:
-
-| Field | Placeholder |
-|-------|-------------|
-| `credentials_path` | `/path/to/your/credentials` |
-
 ## Available Commands
 
 | Command          | Description                 | Required Options          |
@@ -70,7 +62,7 @@ Copy `config.template.json` to `config.json` and fill in the required values:
 
 | Option               | Description                                       |
 | -------------------- | ------------------------------------------------- |
-| `--base <baseId>`    | Airtable base ID (default: your-base-id) |
+| `--base <baseId>`    | Airtable base ID (default: YOUR_AIRTABLE_BASE_ID) |
 | `--table <name>`     | Table name (e.g., "Products [ManufacturerName]")  |
 | `--id <recordId>`    | Record ID (e.g., recXXXXXXXXXXXXXX)               |
 | `--ids <ids>`        | Comma-separated record IDs                        |
@@ -84,28 +76,28 @@ Copy `config.template.json` to `config.json` and fill in the required values:
 
 ```bash
 # List all tables
-node /Users/USER/node scripts/dist/cli.js list-tables
+node $HOME/node scripts/dist/cli.js list-tables
 
 # Get table schema
-node /Users/USER/node scripts/dist/cli.js describe-table --table "Products [ManufacturerName]"
+node $HOME/node scripts/dist/cli.js describe-table --table "Products [ManufacturerName]"
 
 # List products with limit
-node /Users/USER/node scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --limit 10
+node $HOME/node scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --limit 10
 
 # Search for a product by serial number
-node /Users/USER/node scripts/dist/cli.js search-records --table "Products [ManufacturerName]" --query "LAAEXMPL00000001"
+node $HOME/node scripts/dist/cli.js search-records --table "Products [ManufacturerName]" --query "LAAEXMPL00000001"
 
 # Get a specific record
-node /Users/USER/node scripts/dist/cli.js get-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX
+node $HOME/node scripts/dist/cli.js get-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX
 
 # Create a new record
-node /Users/USER/node scripts/dist/cli.js create-record --table "Models" --fields '{"Name":"Test Model","Type":"Widget"}'
+node $HOME/node scripts/dist/cli.js create-record --table "Models" --fields '{"Name":"Test Model","Type":"Widget"}'
 
 # Update a record
-node /Users/USER/node scripts/dist/cli.js update-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX --fields '{"Status":"Sold"}'
+node $HOME/node scripts/dist/cli.js update-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX --fields '{"Status":"Sold"}'
 
 # Filter records with formula
-node /Users/USER/node scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --filter "{Status}='In Stock'"
+node $HOME/node scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --filter "{Status}='In Stock'"
 ```
 
 ## How It Works

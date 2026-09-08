@@ -3,15 +3,15 @@
 
 Dedicated agent for Airtable database operations with isolated MCP access
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Version](https://img.shields.io/badge/version-1.2.1-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 ## Features
 
 - **list-tables** — List all tables in the base
 - **describe-table** — Get table schema
-- **list-records** — Query records from a table
+- **list-records** — Query records, optionally projecting selected fields
 - **get-record** — Get a single record by ID
-- **search-records** — Search records by text
+- **search-records** — Search records by text with a bounded result count
 - **create-record** — Create a new record
 - **update-record** — Update an existing record
 - **delete-records** — Delete records
@@ -28,11 +28,11 @@ Dedicated agent for Airtable database operations with isolated MCP access
 git clone https://github.com/bigl34/claude-code-plugin-airtable.git
 cd claude-code-plugin-airtable
 cp config.template.json config.json  # fill in your credentials
-cd scripts && npm install
+npm --prefix scripts install
 ```
 
 ```bash
-node scripts/dist/cli.js list-tables
+npm --prefix scripts run cli -- list-tables
 ```
 
 ## Installation
@@ -47,57 +47,60 @@ node scripts/dist/cli.js list-tables
 
 ## Available Commands
 
-| Command          | Description                 | Required Options          |
-| ---------------- | --------------------------- | ------------------------- |
-| `list-tables`    | List all tables in the base | (none)                    |
-| `describe-table` | Get table schema            | `--table`                 |
-| `list-records`   | Query records from a table  | `--table`                 |
-| `get-record`     | Get a single record by ID   | `--table --id`            |
-| `search-records` | Search records by text      | `--table --query`         |
-| `create-record`  | Create a new record         | `--table --fields`        |
-| `update-record`  | Update an existing record   | `--table --id --fields`   |
-| `delete-records` | Delete records              | `--table --id` or `--ids` |
+| Command          | Description                                          | Required Options                                                  |
+| ---------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
+| `list-tables`    | List all tables in the base                          | (none)                                                            |
+| `describe-table` | Get table schema                                     | `--table`                                                         |
+| `list-records`   | Query records, optionally projecting selected fields | `--table`; optional projection `--fields <comma-separated names>` |
+| `get-record`     | Get a single record by ID                            | `--table --id`                                                    |
+| `search-records` | Search records by text with a bounded result count   | `--table --query`; optional `--limit`                             |
+| `create-record`  | Create a new record                                  | `--table --fields`                                                |
+| `update-record`  | Update an existing record                            | `--table --id --fields`                                           |
+| `delete-records` | Delete records                                       | `--table --id` or `--ids`                                         |
 
 ### Common Options
 
-| Option               | Description                                       |
-| -------------------- | ------------------------------------------------- |
-| `--base <baseId>`    | Airtable base ID (default: YOUR_AIRTABLE_BASE_ID) |
-| `--table <name>`     | Table name (e.g., "Products [ManufacturerName]")  |
-| `--id <recordId>`    | Record ID (e.g., recXXXXXXXXXXXXXX)               |
-| `--ids <ids>`        | Comma-separated record IDs                        |
-| `--fields <json>`    | JSON object of field values                       |
-| `--filter <formula>` | Airtable filter formula                           |
-| `--query <text>`     | Search term                                       |
-| `--limit <number>`   | Maximum records to return                         |
-| `--view <name>`      | Airtable view name                                |
+| Option               | Description                                                                                                 |
+| -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `--base <baseId>`    | Airtable base ID (default: YOUR_AIRTABLE_BASE_ID)                                                           |
+| `--table <name>`     | Table name (e.g., "Products [ManufacturerName]")                                                            |
+| `--id <recordId>`    | Record ID (e.g., recXXXXXXXXXXXXXX)                                                                         |
+| `--ids <ids>`        | Comma-separated record IDs                                                                                  |
+| `--fields <value>`   | For `list-records`, comma-separated projected field names; for create/update, a JSON object of field values |
+| `--filter <formula>` | Airtable filter formula                                                                                     |
+| `--query <text>`     | Search term                                                                                                 |
+| `--limit <number>`   | Maximum records to return                                                                                   |
+| `--view <name>`      | Airtable view name                                                                                          |
 
 ## Usage Examples
 
 ```bash
 # List all tables
-node $HOME/node scripts/dist/cli.js list-tables
+npm --prefix "scripts" run cli -- list-tables
 
 # Get table schema
-node $HOME/node scripts/dist/cli.js describe-table --table "Products [ManufacturerName]"
+npm --prefix "scripts" run cli -- describe-table --table "Products [ManufacturerName]"
 
 # List products with limit
-node $HOME/node scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --limit 10
+npm --prefix "scripts" run cli -- list-records --table "Products [ManufacturerName]" --limit 10
+
+# List only the fields needed for the task
+npm --prefix "scripts" run cli -- list-records --table "Products [ManufacturerName]" --fields "SerialNumber,Status,Location"
 
 # Search for a product by serial number
-node $HOME/node scripts/dist/cli.js search-records --table "Products [ManufacturerName]" --query "LAAEXMPL00000001"
+npm --prefix "scripts" run cli -- search-records --table "Products [ManufacturerName]" --query "LAAEXMPL00000001" --limit 10
 
 # Get a specific record
-node $HOME/node scripts/dist/cli.js get-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX
+npm --prefix "scripts" run cli -- get-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX
 
 # Create a new record
-node $HOME/node scripts/dist/cli.js create-record --table "Models" --fields '{"Name":"Test Model","Type":"Widget"}'
+npm --prefix "scripts" run cli -- create-record --table "Models" --fields '{"Name":"Test Model","Type":"Widget"}'
 
 # Update a record
-node $HOME/node scripts/dist/cli.js update-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX --fields '{"Status":"Sold"}'
+npm --prefix "scripts" run cli -- update-record --table "Products [ManufacturerName]" --id recXXXXXXXXXXXXXX --fields '{"Status":"Sold"}'
 
 # Filter records with formula
-node $HOME/node scripts/dist/cli.js list-records --table "Products [ManufacturerName]" --filter "{Status}='In Stock'"
+npm --prefix "scripts" run cli -- list-records --table "Products [ManufacturerName]" --filter "{Status}='In Stock'"
 ```
 
 ## How It Works

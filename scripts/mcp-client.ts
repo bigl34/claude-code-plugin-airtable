@@ -1,27 +1,10 @@
-/**
- * Airtable MCP Client
- *
- * Wrapper client for Airtable REST API via MCP server.
- * Handles bases, tables, and records with automatic table ID resolution.
- * Configuration from config.json with default base ID and API key from environment.
- *
- * Key features:
- * - Automatic table name → table ID resolution
- * - In-memory caching of table mappings
- * - Filter formula support for complex queries
- * - Batch record operations (update, delete)
- */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { spawn, ChildProcess } from "child_process";
-import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { loadServiceConfig } from "@local/cli-utils";
 import { PluginCache, TTL, createCacheKey } from "@local/plugin-cache";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 interface MCPConfig {
   mcpServer: {
@@ -32,96 +15,103 @@ interface MCPConfig {
   defaultBase: string;
 }
 
+export interface MinimalMcpClient {
+  callTool(
+    params: { name: string; arguments: Record<string, unknown> },
+    resultSchema?: unknown,
+    options?: RequestOptions,
+  ): Promise<{
+    content: unknown;
+    isError?: boolean;
+  }>;
+  listTools(): Promise<{ tools: unknown[] }>;
+  close(): Promise<void>;
+}
+
 interface ToolResult {
   content: Array<{ type: string; text?: string }>;
   isError?: boolean;
 }
 
-// Initialize cache with namespace
-const cache = new PluginCache({
-  namespace: "airtable-manager",
-  defaultTTL: TTL.FIFTEEN_MINUTES,
-});
+let productionCache: PluginCache | null = null;
+
+function getProductionCache(): PluginCache {
+  productionCache ??= new PluginCache({
+    namespace: "airtable-manager",
+    defaultTTL: TTL.FIFTEEN_MINUTES,
+  });
+  return productionCache;
+}
 
 export class AirtableMCPClient {
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
   private config: MCPConfig;
   private connected: boolean = false;
-  private tableIdCache: Map<string, Map<string, string>> = new Map(); // baseId -> (tableName -> tableId)
+  private tableIdCache: Map<string, Map<string, string>> = new Map();
   private cacheDisabled: boolean = false;
+  private injectedClient: MinimalMcpClient | null;
+  private readonly cache: PluginCache;
 
-  constructor() {
-    // When compiled, __dirname is dist/, so look in parent for config.json
-    const configPath = join(__dirname, "..", "config.json");
-    this.config = JSON.parse(readFileSync(configPath, "utf-8"));
+  constructor(opts?: { client?: MinimalMcpClient; config?: MCPConfig; cacheDir?: string }) {
+    this.injectedClient = opts?.client ?? null;
+    this.cache = opts?.cacheDir
+      ? new PluginCache({
+          namespace: "airtable-manager",
+          defaultTTL: TTL.FIFTEEN_MINUTES,
+          cacheDir: opts.cacheDir,
+        })
+      : getProductionCache();
+
+    if (opts?.config) {
+      this.config = opts.config;
+    } else if (opts?.client) {
+      this.config = { mcpServer: { command: "", args: [] }, defaultBase: "" };
+    } else {
+      this.config = loadServiceConfig<MCPConfig>("airtable-manager", {
+        remedy: "Run cred-loader-sync to regenerate credentials.",
+      });
+    }
   }
 
-  // ============================================
-  // CACHE CONTROL
-  // ============================================
 
-  /**
-   * Disables caching for all subsequent requests.
-   * Useful for debugging or when fresh data is required.
-   */
   disableCache(): void {
     this.cacheDisabled = true;
-    cache.disable();
+    this.cache.disable();
   }
 
-  /**
-   * Re-enables caching after it was disabled.
-   */
   enableCache(): void {
     this.cacheDisabled = false;
-    cache.enable();
+    this.cache.enable();
   }
 
-  /**
-   * Returns cache statistics including hit/miss counts.
-   * @returns Cache stats object with hits, misses, and entry count
-   */
   getCacheStats() {
-    return cache.getStats();
+    return this.cache.getStats();
   }
 
-  /**
-   * Clears all cached data.
-   * @returns Number of cache entries cleared
-   */
   clearCache(): number {
-    return cache.clear();
+    return this.cache.clear();
   }
 
-  /**
-   * Invalidates a specific cache entry by key.
-   * @param key - The cache key to invalidate
-   * @returns true if entry was found and removed, false otherwise
-   */
   invalidateCacheKey(key: string): boolean {
-    return cache.invalidate(key);
+    return this.cache.invalidate(key);
   }
 
-  // ============================================
-  // CONNECTION MANAGEMENT
-  // ============================================
 
-  /**
-   * Establishes connection to the MCP server.
-   * Called automatically by other methods when needed.
-   *
-   * @throws {Error} If AIRTABLE_API_KEY environment variable is not set
-   */
   async connect(): Promise<void> {
     if (this.connected) return;
+
+    if (this.injectedClient) {
+      this.client = this.injectedClient as unknown as Client;
+      this.connected = true;
+      return;
+    }
 
     const env = {
       ...process.env,
       ...this.config.mcpServer.env,
     };
 
-    // Ensure AIRTABLE_API_KEY is set
     if (!env.AIRTABLE_API_KEY) {
       throw new Error(
         "AIRTABLE_API_KEY environment variable is not set. " +
@@ -144,9 +134,6 @@ export class AirtableMCPClient {
     this.connected = true;
   }
 
-  /**
-   * Disconnects from the MCP server.
-   */
   async disconnect(): Promise<void> {
     if (this.client && this.connected) {
       await this.client.close();
@@ -154,32 +141,21 @@ export class AirtableMCPClient {
     }
   }
 
-  // ============================================
-  // MCP TOOLS
-  // ============================================
 
-  /**
-   * Lists available MCP tools from the Airtable server.
-   * @returns Array of tool definitions with name and description
-   */
   async listTools(): Promise<any[]> {
     await this.connect();
     const result = await this.client!.listTools();
     return result.tools;
   }
 
-  /**
-   * Calls an MCP tool with arguments.
-   *
-   * @param name - Tool name (e.g., "list_bases", "list_records")
-   * @param args - Tool arguments
-   * @returns Parsed tool response (JSON parsed if possible)
-   * @throws {Error} If tool call fails
-   */
-  async callTool(name: string, args: Record<string, any>): Promise<any> {
+  async callTool(
+    name: string,
+    args: Record<string, any>,
+    options?: RequestOptions,
+  ): Promise<any> {
     await this.connect();
 
-    const result = await this.client!.callTool({ name, arguments: args });
+    const result = await this.client!.callTool({ name, arguments: args }, undefined, options);
     const content = result.content as Array<{ type: string; text?: string }>;
 
     if (result.isError) {
@@ -199,35 +175,12 @@ export class AirtableMCPClient {
     return content;
   }
 
-  // ============================================
-  // TABLE ID RESOLUTION
-  // ============================================
 
-  /**
-   * Resolves a table name to its Airtable table ID.
-   *
-   * Some Airtable MCP tools (describe_table, search_records) only work with
-   * table IDs (e.g., "tblXXXXXXX"), not table names. This method handles the
-   * automatic resolution.
-   *
-   * Results are cached in memory per base to avoid repeated API calls.
-   *
-   * @param tableName - Table name or table ID (IDs starting with "tbl" pass through)
-   * @param baseId - Airtable base ID
-   * @returns The table ID
-   * @throws {Error} If table is not found in the base
-   *
-   * @example
-   * const tableId = await client.resolveTableId("Products", "appXXXXXX");
-   * // Returns: "tblYYYYYY"
-   */
   private async resolveTableId(tableName: string, baseId: string): Promise<string> {
-    // If it looks like a table ID already (starts with "tbl"), return as-is
     if (tableName.startsWith("tbl")) {
       return tableName;
     }
 
-    // Check in-memory cache first
     if (this.tableIdCache.has(baseId)) {
       const baseCache = this.tableIdCache.get(baseId)!;
       if (baseCache.has(tableName)) {
@@ -235,18 +188,15 @@ export class AirtableMCPClient {
       }
     }
 
-    // Fetch tables and cache them
     const tablesResult = await this.callTool("list_tables", { baseId });
     const tables = tablesResult.tables || [];
 
-    // Build cache for this base
     const baseCache = new Map<string, string>();
     for (const table of tables) {
       baseCache.set(table.name, table.id);
     }
     this.tableIdCache.set(baseId, baseCache);
 
-    // Look up the requested table
     const tableId = baseCache.get(tableName);
     if (!tableId) {
       throw new Error(`Table "${tableName}" not found in base ${baseId}. Available tables: ${tables.map((t: any) => t.name).join(", ")}`);
@@ -255,77 +205,32 @@ export class AirtableMCPClient {
     return tableId;
   }
 
-  // ============================================
-  // READ OPERATIONS
-  // ============================================
 
-  /**
-   * Lists all accessible Airtable bases.
-   *
-   * @returns Object with bases array containing id, name, and permissionLevel
-   *
-   * @cached TTL: 1 hour
-   *
-   * @example
-   * const { bases } = await client.listBases();
-   * for (const base of bases) {
-   *   console.log(base.id, base.name);
-   * }
-   */
   async listBases(): Promise<any> {
-    return cache.getOrFetch(
+    return this.cache.getOrFetch(
       "bases",
       () => this.callTool("list_bases", {}),
       { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
     );
   }
 
-  /**
-   * Lists all tables in a base.
-   *
-   * @param baseId - Airtable base ID (defaults to configured default base)
-   * @returns Object with tables array containing id, name, and field definitions
-   *
-   * @cached TTL: 1 hour
-   *
-   * @example
-   * const { tables } = await client.listTables();
-   * console.log(tables.map(t => t.name)); // ["Products", "Orders", ...]
-   */
   async listTables(baseId?: string): Promise<any> {
     const resolvedBaseId = baseId || this.config.defaultBase;
     const cacheKey = createCacheKey("tables", { baseId: resolvedBaseId });
 
-    return cache.getOrFetch(
+    return this.cache.getOrFetch(
       cacheKey,
       () => this.callTool("list_tables", { baseId: resolvedBaseId }),
       { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
     );
   }
 
-  /**
-   * Gets the schema/field definitions for a table.
-   *
-   * Automatically resolves table names to IDs.
-   *
-   * @param tableName - Table name or table ID
-   * @param baseId - Airtable base ID (defaults to configured default base)
-   * @returns Table schema with field definitions, types, and options
-   *
-   * @cached TTL: 1 hour
-   *
-   * @example
-   * const schema = await client.describeTable("Products");
-   * for (const field of schema.fields) {
-   *   console.log(field.name, field.type);
-   * }
-   */
   async describeTable(tableName: string, baseId?: string): Promise<any> {
     const resolvedBaseId = baseId || this.config.defaultBase;
     const tableId = await this.resolveTableId(tableName, resolvedBaseId);
     const cacheKey = createCacheKey("table_schema", { baseId: resolvedBaseId, tableId });
 
-    return cache.getOrFetch(
+    return this.cache.getOrFetch(
       cacheKey,
       () => this.callTool("describe_table", {
         baseId: resolvedBaseId,
@@ -335,34 +240,6 @@ export class AirtableMCPClient {
     );
   }
 
-  /**
-   * Lists records from a table with optional filtering.
-   *
-   * Supports Airtable formula filtering for complex queries.
-   *
-   * @param tableName - Table name or table ID
-   * @param options - Query options
-   * @param options.baseId - Override default base ID
-   * @param options.maxRecords - Maximum records to return
-   * @param options.filterFormula - Airtable formula to filter records
-   * @param options.view - View name to use (applies view's filters/sorts)
-   * @returns Object with records array containing id and fields
-   *
-   * @cached TTL: 15 minutes
-   *
-   * @example
-   * // Get all products in stock
-   * const { records } = await client.listRecords("Products", {
-   *   filterFormula: "{In Stock} = TRUE()",
-   *   maxRecords: 100
-   * });
-   *
-   * @example
-   * // Use a specific view
-   * const { records } = await client.listRecords("Orders", {
-   *   view: "Pending Orders"
-   * });
-   */
   async listRecords(
     tableName: string,
     options?: {
@@ -370,6 +247,8 @@ export class AirtableMCPClient {
       maxRecords?: number;
       filterFormula?: string;
       view?: string;
+      offset?: string;
+      fields?: string[];
     }
   ): Promise<any> {
     const resolvedBaseId = options?.baseId || this.config.defaultBase;
@@ -379,9 +258,13 @@ export class AirtableMCPClient {
       maxRecords: options?.maxRecords,
       filter: options?.filterFormula,
       view: options?.view,
+      offset: options?.offset,
+      fields: options?.fields?.length
+        ? JSON.stringify([...options.fields].sort())
+        : undefined,
     });
 
-    return cache.getOrFetch(
+    return this.cache.getOrFetch(
       cacheKey,
       async () => {
         const args: Record<string, any> = {
@@ -392,27 +275,15 @@ export class AirtableMCPClient {
         if (options?.maxRecords) args.maxRecords = options.maxRecords;
         if (options?.filterFormula) args.filterByFormula = options.filterFormula;
         if (options?.view) args.view = options.view;
+        if (options?.offset) args.offset = options.offset;
+        if (options?.fields?.length) args.fields = options.fields;
 
-        return this.callTool("list_records", args);
+        return this.callTool("list_records", args, { timeout: 150_000 });
       },
       { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
     );
   }
 
-  /**
-   * Gets a single record by ID.
-   *
-   * @param tableName - Table name or table ID
-   * @param recordId - Airtable record ID (e.g., "recXXXXXX")
-   * @param baseId - Override default base ID
-   * @returns Record object with id and fields
-   *
-   * @cached TTL: 15 minutes
-   *
-   * @example
-   * const record = await client.getRecord("Products", "recABC123");
-   * console.log(record.fields["SerialNumber"]);
-   */
   async getRecord(tableName: string, recordId: string, baseId?: string): Promise<any> {
     const resolvedBaseId = baseId || this.config.defaultBase;
     const cacheKey = createCacheKey("record", {
@@ -421,7 +292,7 @@ export class AirtableMCPClient {
       id: recordId,
     });
 
-    return cache.getOrFetch(
+    return this.cache.getOrFetch(
       cacheKey,
       () => this.callTool("get_record", {
         baseId: resolvedBaseId,
@@ -432,102 +303,47 @@ export class AirtableMCPClient {
     );
   }
 
-  /**
-   * Searches records in a table by text.
-   *
-   * Performs a full-text search across all fields.
-   * Automatically resolves table names to IDs.
-   *
-   * @param tableName - Table name or table ID
-   * @param searchTerm - Text to search for
-   * @param baseId - Override default base ID
-   * @returns Object with matching records
-   *
-   * @cached TTL: 5 minutes
-   *
-   * @example
-   * // Search for a serial number
-   * const results = await client.searchRecords("Products", "L9EXXX12345");
-   */
-  async searchRecords(tableName: string, searchTerm: string, baseId?: string): Promise<any> {
+  async searchRecords(
+    tableName: string,
+    searchTerm: string,
+    baseId?: string,
+    maxRecords?: number,
+  ): Promise<unknown> {
     const resolvedBaseId = baseId || this.config.defaultBase;
     const tableId = await this.resolveTableId(tableName, resolvedBaseId);
     const cacheKey = createCacheKey("search", {
       baseId: resolvedBaseId,
       tableId,
       term: searchTerm,
+      maxRecords,
     });
 
-    return cache.getOrFetch(
+    return this.cache.getOrFetch(
       cacheKey,
-      () => this.callTool("search_records", {
-        baseId: resolvedBaseId,
-        tableId: tableId,
-        searchTerm: searchTerm,
-      }),
+      () => {
+        const args: Record<string, unknown> = {
+          baseId: resolvedBaseId,
+          tableId: tableId,
+          searchTerm: searchTerm,
+        };
+        if (maxRecords !== undefined) args.maxRecords = maxRecords;
+        return this.callTool("search_records", args);
+      },
       { ttl: TTL.FIVE_MINUTES, bypassCache: this.cacheDisabled }
     );
   }
 
-  // ============================================
-  // MUTATION OPERATIONS
-  // ============================================
 
-  /**
-   * Creates a new record in a table.
-   *
-   * @param tableName - Table name or table ID
-   * @param fields - Field values to set (field name → value)
-   * @param baseId - Override default base ID
-   * @returns Created record object with id and fields
-   *
-   * @invalidates records/{tableName}/*
-   *
-   * @example
-   * const record = await client.createRecord("Products", {
-   *   "SerialNumber": "L9EXXX12345",
-   *   "Model": "Product A",
-   *   "In Stock": true
-   * });
-   * console.log("Created:", record.id);
-   */
   async createRecord(tableName: string, fields: Record<string, any>, baseId?: string): Promise<any> {
     const result = await this.callTool("create_record", {
       baseId: baseId || this.config.defaultBase,
       tableId: tableName,
       fields: fields,
     });
-    // Invalidate records cache for this table
-    cache.invalidatePattern(new RegExp(`^records.*table=${tableName}`));
+    this.cache.invalidatePattern(new RegExp(`^records.*table=${tableName}`));
     return result;
   }
 
-  /**
-   * Updates one or more records in a table.
-   *
-   * Supports batch updates - each record needs an id and fields to update.
-   * Only specified fields are updated; other fields remain unchanged.
-   *
-   * @param tableName - Table name or table ID
-   * @param records - Array of records to update, each with id and fields
-   * @param baseId - Override default base ID
-   * @returns Array of updated record objects
-   *
-   * @invalidates records/{tableName}/*, record/{recordId}
-   *
-   * @example
-   * // Update single record
-   * await client.updateRecords("Products", [
-   *   { id: "recABC123", fields: { "In Stock": false } }
-   * ]);
-   *
-   * @example
-   * // Batch update multiple records
-   * await client.updateRecords("Products", [
-   *   { id: "recABC123", fields: { "Status": "Sold" } },
-   *   { id: "recDEF456", fields: { "Status": "Sold" } },
-   * ]);
-   */
   async updateRecords(
     tableName: string,
     records: Array<{ id: string; fields: Record<string, any> }>,
@@ -538,11 +354,9 @@ export class AirtableMCPClient {
       tableId: tableName,
       records: records,
     });
-    // Invalidate records cache for this table
-    cache.invalidatePattern(new RegExp(`^records.*table=${tableName}`));
-    // Invalidate individual record caches
+    this.cache.invalidatePattern(new RegExp(`^records.*table=${tableName}`));
     for (const record of records) {
-      cache.invalidate(createCacheKey("record", {
+      this.cache.invalidate(createCacheKey("record", {
         baseId: baseId || this.config.defaultBase,
         table: tableName,
         id: record.id,
@@ -551,39 +365,17 @@ export class AirtableMCPClient {
     return result;
   }
 
-  /**
-   * Deletes one or more records from a table.
-   *
-   * @param tableName - Table name or table ID
-   * @param recordIds - Array of record IDs to delete
-   * @param baseId - Override default base ID
-   * @returns Confirmation of deleted records
-   *
-   * @invalidates records/{tableName}/*
-   *
-   * @example
-   * await client.deleteRecords("Products", ["recABC123", "recDEF456"]);
-   */
   async deleteRecords(tableName: string, recordIds: string[], baseId?: string): Promise<any> {
     const result = await this.callTool("delete_records", {
       baseId: baseId || this.config.defaultBase,
       tableId: tableName,
       recordIds: recordIds,
     });
-    // Invalidate records cache for this table
-    cache.invalidatePattern(new RegExp(`^records.*table=${tableName}`));
+    this.cache.invalidatePattern(new RegExp(`^records.*table=${tableName}`));
     return result;
   }
 
-  // ============================================
-  // UTILITY
-  // ============================================
 
-  /**
-   * Gets the configured default base ID.
-   *
-   * @returns Airtable base ID from config.json
-   */
   getDefaultBase(): string {
     return this.config.defaultBase;
   }

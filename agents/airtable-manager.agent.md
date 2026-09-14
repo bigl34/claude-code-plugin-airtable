@@ -1,7 +1,6 @@
 ---
 name: airtable-manager
 description: Use this agent for all Airtable database operations including product records, customer forms, order data, compliance documents, and operational database queries. This agent has exclusive access to the Airtable MCP server.
-model: claude-opus-4-6
 color: info
 mode: subagent
 ---

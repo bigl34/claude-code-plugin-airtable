@@ -1,6 +1,6 @@
 {
   "name": "airtable-manager",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Dedicated agent for Airtable database operations with isolated MCP access",
   "repository": "https://github.com/bigl34/claude-code-plugin-airtable"
 }

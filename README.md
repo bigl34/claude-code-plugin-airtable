@@ -3,13 +3,13 @@
 
 Dedicated agent for Airtable database operations with isolated MCP access
 
-![Version](https://img.shields.io/badge/version-1.2.2-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Version](https://img.shields.io/badge/version-1.2.3-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 ## Features
 
 - **list-tables** — List all tables in the base
 - **describe-table** — Get table schema
-- **list-records** — Query records, optionally projecting selected fields
+- **list-records** — Query records
 - **get-record** — Get a single record by ID
 - **search-records** — Search records by text with a bounded result count
 - **create-record** — Create a new record
@@ -47,30 +47,30 @@ npm --prefix scripts run cli -- list-tables
 
 ## Available Commands
 
-| Command          | Description                                          | Required Options                                                  |
-| ---------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
-| `list-tables`    | List all tables in the base                          | (none)                                                            |
-| `describe-table` | Get table schema                                     | `--table`                                                         |
-| `list-records`   | Query records, optionally projecting selected fields | `--table`; optional projection `--fields <comma-separated names>` |
-| `get-record`     | Get a single record by ID                            | `--table --id`                                                    |
-| `search-records` | Search records by text with a bounded result count   | `--table --query`; optional `--limit`                             |
-| `create-record`  | Create a new record                                  | `--table --fields`                                                |
-| `update-record`  | Update an existing record                            | `--table --id --fields`                                           |
-| `delete-records` | Delete records                                       | `--table --id` or `--ids`                                         |
+| Command          | Description                                        | Required Options                                                                  |
+| ---------------- | -------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `list-tables`    | List all tables in the base                        | (none)                                                                            |
+| `describe-table` | Get table schema                                   | `--table`                                                                         |
+| `list-records`   | Query records                                      | `--table`; optional `--filter`, `--view`, `--limit`, `--fields` (see Guideline 6) |
+| `get-record`     | Get a single record by ID                          | `--table --id`                                                                    |
+| `search-records` | Search records by text with a bounded result count | `--table --query`; optional `--limit`                                             |
+| `create-record`  | Create a new record                                | `--table --fields`                                                                |
+| `update-record`  | Update an existing record                          | `--table --id --fields`                                                           |
+| `delete-records` | Delete records                                     | `--table --id` or `--ids`                                                         |
 
 ### Common Options
 
-| Option               | Description                                                                                                 |
-| -------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `--base <baseId>`    | Airtable base ID (default: YOUR_AIRTABLE_BASE_ID)                                                           |
-| `--table <name>`     | Table name (e.g., "Products [ManufacturerName]")                                                            |
-| `--id <recordId>`    | Record ID (e.g., recXXXXXXXXXXXXXX)                                                                         |
-| `--ids <ids>`        | Comma-separated record IDs                                                                                  |
-| `--fields <value>`   | For `list-records`, comma-separated projected field names; for create/update, a JSON object of field values |
-| `--filter <formula>` | Airtable filter formula                                                                                     |
-| `--query <text>`     | Search term                                                                                                 |
-| `--limit <number>`   | Maximum records to return                                                                                   |
-| `--view <name>`      | Airtable view name                                                                                          |
+| Option               | Description                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `--base <baseId>`    | Airtable base ID (default: YOUR_AIRTABLE_BASE_ID)                                                                                     |
+| `--table <name>`     | Table name (e.g., "Products [ManufacturerName]")                                                                                      |
+| `--id <recordId>`    | Record ID (e.g., recXXXXXXXXXXXXXX)                                                                                                   |
+| `--ids <ids>`        | Comma-separated record IDs                                                                                                            |
+| `--fields <value>`   | For `list-records`, comma-separated field names or IDs to project (see Guideline 6); for create/update, a JSON object of field values |
+| `--filter <formula>` | Airtable filter formula                                                                                                               |
+| `--query <text>`     | Search term                                                                                                                           |
+| `--limit <number>`   | Maximum records to return                                                                                                             |
+| `--view <name>`      | Airtable view name                                                                                                                    |
 
 ## Usage Examples
 
@@ -83,9 +83,6 @@ npm --prefix "scripts" run cli -- describe-table --table "Products [Manufacturer
 
 # List products with limit
 npm --prefix "scripts" run cli -- list-records --table "Products [ManufacturerName]" --limit 10
-
-# List only the fields needed for the task
-npm --prefix "scripts" run cli -- list-records --table "Products [ManufacturerName]" --fields "SerialNumber,Status,Location"
 
 # Search for a product by serial number
 npm --prefix "scripts" run cli -- search-records --table "Products [ManufacturerName]" --query "LAAEXMPL00000001" --limit 10

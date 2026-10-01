@@ -1,10 +1,112 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport, type StdioServerParameters } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { spawn, ChildProcess } from "child_process";
+import { readFileSync } from "fs";
+import { createRequire } from "module";
+import { dirname, join } from "path";
 import { loadServiceConfig } from "@local/cli-utils";
 import { PluginCache, TTL, createCacheKey } from "@local/plugin-cache";
+
+export const STDIO_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
+export const SDK_MAX_BUFFER_MIN_VERSION = "1.30.1";
+
+const SDK_PACKAGE_NAME = "@modelcontextprotocol/sdk";
+
+const SDK_STDIO_ENTRY = "@modelcontextprotocol/sdk/client/stdio.js";
+
+const VERSION_CORE_PATTERN = /^([0-9]+)\.([0-9]+)\.([0-9]+)/;
+
+const READ_BUFFER_OVERFLOW_PATTERN = /^ReadBuffer exceeded maximum size/;
+
+type BoundedStdioServerParameters = StdioServerParameters & { maxBufferSize: number };
+
+function parseVersionCore(version: string): number[] | null {
+  const coreMatch = VERSION_CORE_PATTERN.exec(version);
+  if (coreMatch === null) return null;
+  const numericParts = coreMatch.slice(1, 4).map(Number);
+  return numericParts;
+}
+
+export function isVersionOlder(version: string, minimum: string): boolean {
+  const versionParts = parseVersionCore(version);
+  const minimumParts = parseVersionCore(minimum);
+  if (versionParts === null || minimumParts === null) return false;
+  for (let index = 0; index < versionParts.length; index += 1) {
+    const difference = versionParts[index] - minimumParts[index];
+    if (difference !== 0) return difference < 0;
+  }
+  return false;
+}
+
+function resolveSdkStdioEntry(): string {
+  const requireFromClient = createRequire(import.meta.url);
+  return requireFromClient.resolve(SDK_STDIO_ENTRY);
+}
+
+function readPackageManifest(manifestPath: string): { name?: unknown; version?: unknown } | null {
+  try {
+    const manifestText = readFileSync(manifestPath, "utf8");
+    return JSON.parse(manifestText) as { name?: unknown; version?: unknown };
+  } catch {
+    return null;
+  }
+}
+
+export function readResolvedSdkVersion(resolveEntry: () => string = resolveSdkStdioEntry): string | null {
+  let directory: string;
+  try {
+    directory = dirname(resolveEntry());
+  } catch {
+    return null;
+  }
+  while (true) {
+    const manifest = readPackageManifest(join(directory, "package.json")); // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+    const isSdkManifest = manifest?.name === SDK_PACKAGE_NAME;
+    if (isSdkManifest) return typeof manifest.version === "string" ? manifest.version : null;
+    const parentDirectory = dirname(directory);
+    if (parentDirectory === directory) return null;
+    directory = parentDirectory;
+  }
+}
+
+function staleSdkWarningMessage(version: string): string {
+  const bufferMib = STDIO_MAX_BUFFER_BYTES / (1024 * 1024);
+  return (
+    `[airtable-manager] warning: the resolved ${SDK_PACKAGE_NAME} ${version} is older than ` +
+    `${SDK_MAX_BUFFER_MIN_VERSION} and ignores maxBufferSize, so the ${bufferMib} MiB stdio read limit is not ` +
+    `applied; run npm ci at the repo root.`
+  );
+}
+
+export function createStaleSdkWarning(
+  readVersion: () => string | null,
+  writeWarning: (message: string) => void,
+): () => void {
+  let checked = false;
+  return () => {
+    if (checked) return;
+    checked = true;
+    const version = readVersion();
+    if (version === null) return;
+    const ignoresMaxBufferSize = isVersionOlder(version, SDK_MAX_BUFFER_MIN_VERSION);
+    if (!ignoresMaxBufferSize) return;
+    writeWarning(staleSdkWarningMessage(version));
+  };
+}
+
+const warnIfSdkIgnoresMaxBufferSize = createStaleSdkWarning(
+  () => readResolvedSdkVersion(),
+  (message) => process.stderr.write(`${message}\n`),
+);
+
+interface ListedTool {
+  name?: string;
+  inputSchema?: { properties?: Record<string, unknown> };
+}
 
 interface MCPConfig {
   mcpServer: {
@@ -26,6 +128,7 @@ export interface MinimalMcpClient {
   }>;
   listTools(): Promise<{ tools: unknown[] }>;
   close(): Promise<void>;
+  onerror?: (error: Error) => void;
 }
 
 interface ToolResult {
@@ -43,18 +146,32 @@ function getProductionCache(): PluginCache {
   return productionCache;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export class AirtableMCPClient {
   private client: Client | null = null;
   private transport: StdioClientTransport | null = null;
   private config: MCPConfig;
   private connected: boolean = false;
   private tableIdCache: Map<string, Map<string, string>> = new Map();
-  private cacheDisabled: boolean = false;
   private injectedClient: MinimalMcpClient | null;
   private readonly cache: PluginCache;
+  private readonly maxBufferSize: number;
+  private readonly checkSdkVersion: () => void;
+  private bufferOverflowError: Error | null = null;
 
-  constructor(opts?: { client?: MinimalMcpClient; config?: MCPConfig; cacheDir?: string }) {
+  constructor(opts?: {
+    client?: MinimalMcpClient;
+    config?: MCPConfig;
+    cacheDir?: string;
+    maxBufferSize?: number;
+    checkSdkVersion?: () => void;
+  }) {
     this.injectedClient = opts?.client ?? null;
+    this.maxBufferSize = opts?.maxBufferSize ?? STDIO_MAX_BUFFER_BYTES;
+    this.checkSdkVersion = opts?.checkSdkVersion ?? warnIfSdkIgnoresMaxBufferSize;
     this.cache = opts?.cacheDir
       ? new PluginCache({
           namespace: "airtable-manager",
@@ -76,12 +193,10 @@ export class AirtableMCPClient {
 
 
   disableCache(): void {
-    this.cacheDisabled = true;
     this.cache.disable();
   }
 
   enableCache(): void {
-    this.cacheDisabled = false;
     this.cache.enable();
   }
 
@@ -97,11 +212,19 @@ export class AirtableMCPClient {
     return this.cache.invalidate(key);
   }
 
+  private invalidateRecordLists(tableName: string): void {
+    const escapedTableName = escapeRegExp(tableName);
+    const recordListKeys = new RegExp(`^records\\?(?:.*&)?table=${escapedTableName}(?:&|$)`, "s"); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+    this.cache.invalidatePattern(recordListKeys);
+  }
+
 
   async connect(): Promise<void> {
     if (this.connected) return;
+    this.bufferOverflowError = null;
 
     if (this.injectedClient) {
+      this.injectedClient.onerror = (error) => this.noteTransportError(error);
       this.client = this.injectedClient as unknown as Client;
       this.connected = true;
       return;
@@ -119,19 +242,39 @@ export class AirtableMCPClient {
       );
     }
 
-    this.transport = new StdioClientTransport({
+    this.checkSdkVersion();
+    const transportParams: BoundedStdioServerParameters = {
       command: this.config.mcpServer.command,
       args: this.config.mcpServer.args,
       env: env as Record<string, string>,
-    });
+      maxBufferSize: this.maxBufferSize,
+    };
+    this.transport = new StdioClientTransport(transportParams);
 
     this.client = new Client(
       { name: "airtable-cli", version: "1.0.0" },
       { capabilities: {} }
     );
+    this.client.onerror = (error) => this.noteTransportError(error);
 
     await this.client.connect(this.transport);
     this.connected = true;
+  }
+
+  private noteTransportError(error: Error): void {
+    const isBufferOverflow = READ_BUFFER_OVERFLOW_PATTERN.test(error.message);
+    if (isBufferOverflow) this.bufferOverflowError ??= error;
+  }
+
+  private explainTransportFailure(toolName: string, error: unknown): unknown {
+    const overflowError = this.bufferOverflowError;
+    const errorCode = (error as { code?: unknown } | null)?.code;
+    const isConnectionClosed = errorCode === ErrorCode.ConnectionClosed;
+    if (!isConnectionClosed || overflowError === null) return error;
+    const explainedMessage =
+      `${toolName} failed: the MCP stdio transport closed because one response exceeded its read buffer ` +
+      `(${overflowError.message}). Narrow the read with --limit, --filter or --view.`;
+    return new Error(explainedMessage, { cause: error });
   }
 
   async disconnect(): Promise<void> {
@@ -155,7 +298,11 @@ export class AirtableMCPClient {
   ): Promise<any> {
     await this.connect();
 
-    const result = await this.client!.callTool({ name, arguments: args }, undefined, options);
+    const result = await this.client!
+      .callTool({ name, arguments: args }, undefined, options)
+      .catch((error: unknown) => {
+        throw this.explainTransportFailure(name, error);
+      });
     const content = result.content as Array<{ type: string; text?: string }>;
 
     if (result.isError) {
@@ -205,12 +352,25 @@ export class AirtableMCPClient {
     return tableId;
   }
 
+  private async assertListRecordsAcceptsFields(): Promise<void> {
+    const tools: ListedTool[] = await this.listTools();
+    const listRecordsTool = tools.find((tool) => tool.name === "list_records");
+    const inputProperties = listRecordsTool?.inputSchema?.properties ?? {};
+    const acceptsFields = Object.hasOwn(inputProperties, "fields");
+    if (acceptsFields) return;
+    throw new Error(
+      "list-records --fields cannot be honoured: the launched airtable-mcp-server's list_records tool " +
+      "has no \"fields\" input (it was added in 1.14.0), so every field would come back. " +
+      "Omit --fields and narrow with --filter, --view or --limit."
+    );
+  }
+
 
   async listBases(): Promise<any> {
     return this.cache.getOrFetch(
       "bases",
       () => this.callTool("list_bases", {}),
-      { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
+      { ttl: TTL.HOUR }
     );
   }
 
@@ -221,7 +381,7 @@ export class AirtableMCPClient {
     return this.cache.getOrFetch(
       cacheKey,
       () => this.callTool("list_tables", { baseId: resolvedBaseId }),
-      { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
+      { ttl: TTL.HOUR }
     );
   }
 
@@ -236,7 +396,7 @@ export class AirtableMCPClient {
         baseId: resolvedBaseId,
         tableId: tableId,
       }),
-      { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
+      { ttl: TTL.HOUR }
     );
   }
 
@@ -247,7 +407,6 @@ export class AirtableMCPClient {
       maxRecords?: number;
       filterFormula?: string;
       view?: string;
-      offset?: string;
       fields?: string[];
     }
   ): Promise<any> {
@@ -258,8 +417,7 @@ export class AirtableMCPClient {
       maxRecords: options?.maxRecords,
       filter: options?.filterFormula,
       view: options?.view,
-      offset: options?.offset,
-      fields: options?.fields?.length
+      projectedFields: options?.fields?.length
         ? JSON.stringify([...options.fields].sort())
         : undefined,
     });
@@ -275,12 +433,14 @@ export class AirtableMCPClient {
         if (options?.maxRecords) args.maxRecords = options.maxRecords;
         if (options?.filterFormula) args.filterByFormula = options.filterFormula;
         if (options?.view) args.view = options.view;
-        if (options?.offset) args.offset = options.offset;
-        if (options?.fields?.length) args.fields = options.fields;
+        if (options?.fields?.length) {
+          await this.assertListRecordsAcceptsFields();
+          args.fields = options.fields;
+        }
 
         return this.callTool("list_records", args, { timeout: 150_000 });
       },
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -299,7 +459,7 @@ export class AirtableMCPClient {
         tableId: tableName,
         recordId: recordId,
       }),
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -329,7 +489,7 @@ export class AirtableMCPClient {
         if (maxRecords !== undefined) args.maxRecords = maxRecords;
         return this.callTool("search_records", args);
       },
-      { ttl: TTL.FIVE_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIVE_MINUTES }
     );
   }
 
@@ -340,7 +500,7 @@ export class AirtableMCPClient {
       tableId: tableName,
       fields: fields,
     });
-    this.cache.invalidatePattern(new RegExp(`^records.*table=${tableName}`));
+    this.invalidateRecordLists(tableName);
     return result;
   }
 
@@ -354,7 +514,7 @@ export class AirtableMCPClient {
       tableId: tableName,
       records: records,
     });
-    this.cache.invalidatePattern(new RegExp(`^records.*table=${tableName}`));
+    this.invalidateRecordLists(tableName);
     for (const record of records) {
       this.cache.invalidate(createCacheKey("record", {
         baseId: baseId || this.config.defaultBase,
@@ -371,7 +531,7 @@ export class AirtableMCPClient {
       tableId: tableName,
       recordIds: recordIds,
     });
-    this.cache.invalidatePattern(new RegExp(`^records.*table=${tableName}`));
+    this.invalidateRecordLists(tableName);
     return result;
   }
 

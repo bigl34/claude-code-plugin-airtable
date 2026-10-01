@@ -312,7 +312,7 @@ const commands = {
     z.object({
       table: z.string().min(1).describe("Table name"),
       base: z.string().optional().describe("Base ID (uses default if omitted)"),
-      limit: cliTypes.int(1, 100).optional().describe("Max records to return (per page)"),
+      limit: cliTypes.int(1).optional().describe("Max total records to return (Airtable maxRecords); omit to return every matching record"),
       filter: z.string().optional().describe("Airtable filter formula"),
       view: z.string().optional().describe("Airtable view name"),
       fields: z.string().superRefine((value, context) => {
@@ -325,17 +325,15 @@ const commands = {
           });
         }
       }).optional().describe("Comma-separated exact field names or IDs to return"),
-      offset: z.string().optional().describe("Pagination cursor — pass metadata.offset from previous response"),
     }),
     async (args, client: AirtableMCPClient) => {
-      const { table, base, limit, filter, view, fields, offset } = args as {
+      const { table, base, limit, filter, view, fields } = args as {
         table: string;
         base?: string;
         limit?: number;
         filter?: string;
         view?: string;
         fields?: string;
-        offset?: string;
       };
       const projectedFields = normalizeProjectedFields(fields);
       const raw = await client.listRecords(table, {
@@ -344,10 +342,8 @@ const commands = {
         filterFormula: filter,
         view,
         fields: projectedFields,
-        offset,
       });
       const wrappedRecords = wrapRecordList(raw, "records");
-      const nextOffset = (raw as { offset?: string } | undefined)?.offset;
       return buildSafeOutput(
         {
           command: "list-records",
@@ -355,8 +351,7 @@ const commands = {
           table,
           count: wrappedRecords.length,
           fields: projectedFields,
-          offset: nextOffset,
-          has_more: nextOffset !== undefined,
+          has_more: false,
         },
         { records: wrappedRecords },
       );

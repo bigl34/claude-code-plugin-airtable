@@ -40,7 +40,7 @@ Run commands using: `npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- <comm
 |---------|-------------|------------------|
 | `list-tables` | List all tables in the base | (none) |
 | `describe-table` | Get table schema | `--table` |
-| `list-records` | Query records, optionally projecting selected fields | `--table`; optional projection `--fields <comma-separated names>` |
+| `list-records` | Query records | `--table`; optional `--filter`, `--view`, `--limit`, `--fields` (see Guideline 6) |
 | `get-record` | Get a single record by ID | `--table --id` |
 | `search-records` | Search records by text with a bounded result count | `--table --query`; optional `--limit` |
 | `create-record` | Create a new record | `--table --fields` |
@@ -55,7 +55,7 @@ Run commands using: `npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- <comm
 | `--table <name>` | Table name (e.g., "Products [ManufacturerName]") |
 | `--id <recordId>` | Record ID (e.g., recXXXXXXXXXXXXXX) |
 | `--ids <ids>` | Comma-separated record IDs |
-| `--fields <value>` | For `list-records`, comma-separated projected field names; for create/update, a JSON object of field values |
+| `--fields <value>` | For `list-records`, comma-separated field names or IDs to project (see Guideline 6); for create/update, a JSON object of field values |
 | `--filter <formula>` | Airtable filter formula |
 | `--query <text>` | Search term |
 | `--limit <number>` | Maximum records to return |
@@ -72,9 +72,6 @@ npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- describe-table --table "Pr
 
 # List products with limit
 npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- list-records --table "Products [ManufacturerName]" --limit 10
-
-# List only the fields needed for the task
-npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- list-records --table "Products [ManufacturerName]" --fields "SerialNumber,Status,Location"
 
 # Search for a product by serial number
 npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- search-records --table "Products [ManufacturerName]" --query "LAAEXMPL00000001" --limit 10
@@ -99,6 +96,7 @@ npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- list-records --table "Prod
 3. **Customer Forms**: Query Delivery Date and Reg Details tables by order number
 4. **Document Tracking**: Search compliance cert by serial number for compliance certification, registration doc for registration details
 5. **Field Discovery**: The Airtable API omits empty fields from record responses — a record with sparse data will appear to have fewer fields. To see all available fields on a table, use `describe-table` first rather than inferring the schema from individual records.
+6. **Field Projection**: `list-records --fields` works only when the launched airtable-mcp-server supports projection (1.14.0 or later). If it fails with "--fields cannot be honoured", drop `--fields` and narrow the read with `--filter`, `--view` or `--limit` rather than pulling a whole table.
 
 ## Output Format
 
